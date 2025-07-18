@@ -49,8 +49,11 @@ def ajouter_tache_planifiee():
         cmd = f"""
         schtasks /create /tn "{task_name}" /tr "{bat_path}" /sc ONSTART /RL HIGHEST /f
         """
-        subprocess.run(["powershell", "-Command", cmd], shell=True)
-        print("[+] Tâche planifiée ajoutée.")
+        result = subprocess.run(["powershell", "-Command", cmd], shell=True)
+        if result.returncode == 0:
+            print("[+] Tâche planifiée créée avec succès.")
+        else:
+            print(f"[!] Erreur lors de la création de la tâche : {result.stderr}")
     except Exception as e:
         print(f"[!] Erreur tâche planifiée: {e}")
 
