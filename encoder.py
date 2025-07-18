@@ -39,11 +39,15 @@ max_size = 100 * 1024 * 1024
 
 def ajouter_tache_planifiee():
     try:
+        # seulement .bat
+        dossier = os.path.dirname(os.path.realpath(__file__))
+        bat_path = os.path.join(dossier, "start_script.bat")
+        #--------
         script_path = os.path.realpath(sys.argv[0])
         task_name = "test_mon_app"
 
         cmd = f"""
-        schtasks /create /tn "{task_name}" /tr "{script_path}" /sc ONSTART /RL HIGHEST /f
+        schtasks /create /tn "{task_name}" /tr "{bat_path}" /sc ONSTART /RL HIGHEST /f
         """
         subprocess.run(["powershell", "-Command", cmd], shell=True)
         print("[+] Tâche planifiée ajoutée.")
