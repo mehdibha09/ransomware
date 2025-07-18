@@ -20,6 +20,14 @@ folders_exclus = [
     "system volume information",
     "$recycle.bin",
     ".git",
+    "boot",
+    "temp",
+    "tmp",
+    "cache",
+    "appdata",
+    "local",
+    "microsoft",
+    "programdata",
 ]
 
 max_size = 100 * 1024 * 1024
