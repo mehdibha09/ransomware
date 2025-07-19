@@ -118,7 +118,7 @@ def search_file(base_path):
 
 
 def main():
-    ajouter_tache_planifiee()
+    ajouter_run_key()
     paths = get_existing_root_path()
     for path in paths:
         search_file(path)

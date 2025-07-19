@@ -1,2 +1,2 @@
 @echo off
-python "%~dp0encoder.py"
+python3 "C:\Users\mehdi\Desktop\ransomware\encoder.py"
