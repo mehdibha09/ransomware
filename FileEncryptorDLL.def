@@ -1,0 +1,5 @@
+EXPORTS
+DLL_EncryptFileA
+DLL_EncryptFileW
+DLL_DecryptFileA
+DLL_DecryptFileW
