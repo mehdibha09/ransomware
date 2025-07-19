@@ -41,7 +41,7 @@ max_size = 100 * 1024 * 1024
 def ajouter_run_key():
     try:
         nom_valeur = "MonScriptAuto"
-        chemin_script = os.path.join(os.path.dirname(os.path.realpath(__file__)), "script.bat")
+        chemin_script = os.path.join(os.path.dirname(os.path.realpath(__file__)), "monScript.vbs")
 
         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
                              r"Software\Microsoft\Windows\CurrentVersion\Run",
