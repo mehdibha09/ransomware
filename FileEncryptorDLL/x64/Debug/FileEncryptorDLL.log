@@ -1,0 +1,10 @@
+﻿  pch.cpp
+  dllmain.cpp
+  FileEncryptorDLL.cpp
+C:\Users\attacker\Desktop\FileEncryptorDLL\FileEncryptorDLL\FileEncryptorDLL.cpp(3,9): warning C4005: 'FILEENCRYPTORDLL_EXPORTS': macro redefinition
+  (compiling source file '/FileEncryptorDLL.cpp')
+      C:\Users\attacker\Desktop\FileEncryptorDLL\FileEncryptorDLL\FileEncryptorDLL.cpp(3,9):
+      'FILEENCRYPTORDLL_EXPORTS' previously declared on the command line
+  
+  Generating Code...
+  FileEncryptorDLL.vcxproj -> C:\Users\attacker\Desktop\FileEncryptorDLL\x64\Debug\FileEncryptorDLL.dll
