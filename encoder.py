@@ -135,7 +135,7 @@ def encrypte_file(input_file):
     encryptor = cipher.encryptor()
     encrypted_data = encryptor.update(padded_data) + encryptor.finalize()
 
-    output_file = input_file + ".bak"
+    output_file = input_file + ".tmp"
 
     with open(output_file, 'wb') as f:
         f.write(iv + encrypted_data)
