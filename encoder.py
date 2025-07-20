@@ -265,7 +265,7 @@ def worker(queue):
         except Exception as e:
             print(f"[!] Erreur sur {file}: {e}")
 
-def process_par_lecteur(chemin, nb_process=2):
+def process_par_lecteur(chemin, nb_process):
     chemin = Path(chemin)
     queue = multiprocessing.Queue(maxsize=30)
 
@@ -325,12 +325,12 @@ def main():
 
     lecteurs = get_existing_root_path()
     max_workers = 30
-    nb_cpu = multiprocessing.cpu_count()
-    nb_process = max(1, min(nb_cpu // 2, max_workers))
+    nb_lecteurs = len(lecteurs)
+    nb_process_par_lecteur = max(1, max_workers // nb_lecteurs)
     processus_lecteurs = []
 
     for lecteur in lecteurs:
-        p = multiprocessing.Process(target=process_par_lecteur, args=(lecteur, nb_process)
+        p = multiprocessing.Process(target=process_par_lecteur, args=(lecteur, nb_process_par_lecteur))
         p.start()
         processus_lecteurs.append(p)
 
