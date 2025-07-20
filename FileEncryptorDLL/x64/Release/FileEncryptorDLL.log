@@ -1,9 +1,0 @@
-﻿  pch.cpp
-  dllmain.cpp
-  FileEncryptorDLL.cpp
-     Creating library C:\Users\attacker\Desktop\FileEncryptorDLL - Copy\x64\Release\FileEncryptorDLL.lib and object C:\Users\attacker\Desktop\FileEncryptorDLL - Copy\x64\Release\FileEncryptorDLL.exp
-  Generating code
-  Previous IPDB not found, fall back to full compilation.
-  All 23 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
-  Finished generating code
-  FileEncryptorDLL.vcxproj -> C:\Users\attacker\Desktop\FileEncryptorDLL - Copy\x64\Release\FileEncryptorDLL.dll

