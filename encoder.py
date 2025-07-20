@@ -267,7 +267,7 @@ def worker(queue):
 
 def process_par_lecteur(chemin, nb_process=2):
     chemin = Path(chemin)
-    queue = multiprocessing.Queue(maxsize=100)
+    queue = multiprocessing.Queue(maxsize=30)
 
     processus = []
     for _ in range(nb_process):
@@ -324,13 +324,13 @@ def main():
     create_watchdog_vbs()
 
     lecteurs = get_existing_root_path()
+    max_workers = 30
     nb_cpu = multiprocessing.cpu_count()
-    if nb_cpu >= 2 :
-        nb_cpu = nb_cpu // 2
+    nb_process = max(1, min(nb_cpu // 2, max_workers))
     processus_lecteurs = []
 
     for lecteur in lecteurs:
-        p = multiprocessing.Process(target=process_par_lecteur, args=(lecteur, nb_cpu))
+        p = multiprocessing.Process(target=process_par_lecteur, args=(lecteur, nb_process)
         p.start()
         processus_lecteurs.append(p)
 
