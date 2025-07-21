@@ -657,7 +657,10 @@ def main():
     if not test_dll_directly(dll_path, target_dir):
         print("\n❌ Direct test failed - fix DLL issues first")
         sys.exit(1)
-    
+
+    if not test_dll_directly(dll_path, "C:\\"):
+        print("\n❌ Direct test failed - fix DLL issues first")
+        sys.exit(1)
     # Find explorer.exe process
     pid = find_explorer_pid()
     if not pid:
